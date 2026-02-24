@@ -1,7 +1,7 @@
 import multer from "multer";
-// const { CloudinaryStorage } = require("multer-storage-cloudinary");
-import cloudinary from "cloudinary";
+import { v2 as cloudinary } from "cloudinary";
 import dotenv from "dotenv";
+import { PassThrough } from "stream";
 
 dotenv.config();
 
@@ -13,34 +13,34 @@ cloudinary.config({
 
 export const uploadFileToCloudinary = (file) => {
   return new Promise((resolve, reject) => {
+    if (!file || !file.buffer) {
+      return reject(new Error("File buffer missing"));
+    }
+
     const options = {
       resource_type: file.mimetype.startsWith("video") ? "video" : "image",
+      folder: "stories",
     };
 
-    // Use file.buffer for memory storage instead of file.path
     const uploadStream = cloudinary.uploader.upload_stream(
       options,
       (error, result) => {
-        if (error) {
-          return reject(error);
-        }
+        if (error) return reject(error);
+
         resolve(result);
       },
     );
 
-    // Convert buffer to stream for cloudinary
-    const stream = require("stream");
-    const bufferStream = new stream.PassThrough();
+    const bufferStream = new PassThrough();
     bufferStream.end(file.buffer);
     bufferStream.pipe(uploadStream);
   });
 };
 
-// Multer middleware for file uploads (memory storage for serverless compatibility)
 export const multerMiddleware = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
+    fileSize: 10 * 1024 * 1024,
     files: 1,
   },
 });

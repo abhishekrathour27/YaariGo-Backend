@@ -1,48 +1,86 @@
 import User from "../model/userModel.js";
 import response from "../utils/responseHandler.js";
+import Notification from "../model/notification.js";
 const followUser = async (req, res) => {
-  // Request body se follow karne wale user ka ID lena
+  // Request body se request bhejne wale / follow back karne wale user ka ID lena
   const { userIdToFollow } = req.body;
-  // Jo user follow kar raha hai uska ID lena (authentication middleware se aayega)
+  // Jo user action perform kar raha hai uska ID (authentication middleware se)
   const userId = req.user?.userId;
 
-  // Agar user khud ko follow karne ki koshish kare to error dena
   if (userId === userIdToFollow) {
-    return response(res, 400, "You are not allowed to follow yourself");
+    return response(res, 400, "You cannot request/friend yourself");
   }
 
   try {
-    // Database se dono users ka data fetch karna
     const userToFollow = await User.findById(userIdToFollow);
     const currentUser = await User.findById(userId);
 
-    // Check karna ki dono users exist karte hain ya nahi
     if (!userToFollow || !currentUser) {
       return response(res, 404, "User not found");
     }
 
-    // Agar user pehle se hi follow kar raha hai to error dena
-    if (currentUser.followings.includes(userIdToFollow)) {
-      return response(res, 400, "You are already following this user");
+    // Check if they are already friends
+    if (currentUser.friends.includes(userIdToFollow)) {
+      return response(res, 400, "You are already friends with this user");
     }
 
-    // Current user ki followings list me naye user ka ID add karna
-    currentUser.followings.push(userIdToFollow);
-    // Jise follow kiya uski followers list me current user ka ID add karna
-    userToFollow.followers.push(userId);
+    // Check if there is already an active incoming friend request from userToFollow to currentUser
+    if (currentUser.friendRequestsReceived.includes(userIdToFollow)) {
+      // Accept the friend request!
+      // Add each other to friends lists
+      currentUser.friends.push(userIdToFollow);
+      userToFollow.friends.push(userId);
 
-    // Dono users ke follow count update karna
-    currentUser.followingCount += 1;
-    userToFollow.followerCount += 1;
+      // Remove from pending request lists
+      currentUser.friendRequestsReceived = currentUser.friendRequestsReceived.filter(
+        (id) => id.toString() !== userIdToFollow
+      );
+      userToFollow.friendRequestsSent = userToFollow.friendRequestsSent.filter(
+        (id) => id.toString() !== userId
+      );
 
-    // Database me updated data save karna
-    await currentUser.save();
-    await userToFollow.save();
+      // Update count
+      currentUser.friendsCount = currentUser.friends.length;
+      userToFollow.friendsCount = userToFollow.friends.length;
 
-    // Success response return karna
-    return response(res, 200, "User followed successfully");
+      // Save both
+      await currentUser.save({ validateBeforeSave: false });
+      await userToFollow.save({ validateBeforeSave: false });
+
+      // Create accept notification
+      await Notification.create({
+        recipient: userIdToFollow,
+        sender: userId,
+        type: "friend_accept",
+        message: "accepted your friend request",
+      });
+
+      return response(res, 200, "Friend request accepted successfully");
+    }
+
+    // Otherwise, check if we have already sent a request to them
+    if (currentUser.friendRequestsSent.includes(userIdToFollow)) {
+      return response(res, 400, "Friend request already sent");
+    }
+
+    // Send a new friend request
+    currentUser.friendRequestsSent.push(userIdToFollow);
+    userToFollow.friendRequestsReceived.push(userId);
+
+    // Save both
+    await currentUser.save({ validateBeforeSave: false });
+    await userToFollow.save({ validateBeforeSave: false });
+
+    // Create follow notification (for requests, type is friend_request)
+    await Notification.create({
+      recipient: userIdToFollow,
+      sender: userId,
+      type: "friend_request",
+      message: "sent you a friend request",
+    });
+
+    return response(res, 200, "Friend request sent successfully");
   } catch (error) {
-    // Agar koi error aata hai to uska response bhejna
     return response(res, 500, "Internal server error", error.message);
   }
 };
@@ -52,7 +90,7 @@ const unFollowUser = async (req, res) => {
   const userId = req.user?.userId;
 
   if (userId === userIdToUnFollow) {
-    return response(res, 400, "You are not allowed to unfollow yourself");
+    return response(res, 400, "You are not allowed to unfriend yourself");
   }
 
   try {
@@ -63,29 +101,40 @@ const unFollowUser = async (req, res) => {
       return response(res, 404, "User not found");
     }
 
-    if (!currentUser.followings.includes(userIdToUnFollow)) {
-      return response(res, 400, "You are not following this user");
+    // If they are friends, remove friendship
+    if (currentUser.friends.includes(userIdToUnFollow)) {
+      currentUser.friends = currentUser.friends.filter(
+        (id) => id.toString() !== userIdToUnFollow
+      );
+      userToUnFollow.friends = userToUnFollow.friends.filter(
+        (id) => id.toString() !== userId
+      );
+
+      currentUser.friendsCount = Math.max(0, currentUser.friends.length);
+      userToUnFollow.friendsCount = Math.max(0, userToUnFollow.friends.length);
+
+      await currentUser.save({ validateBeforeSave: false });
+      await userToUnFollow.save({ validateBeforeSave: false });
+
+      return response(res, 200, "Unfriended user successfully");
     }
 
-    // Remove user from follow lists
-    currentUser.followings = currentUser.followings.filter(
-      (id) => id.toString() !== userIdToUnFollow
-    );
-    userToUnFollow.followers = userToUnFollow.followers.filter(
-      (id) => id.toString() !== userId
-    );
+    // If there is a pending sent request, cancel/remove it
+    if (currentUser.friendRequestsSent.includes(userIdToUnFollow)) {
+      currentUser.friendRequestsSent = currentUser.friendRequestsSent.filter(
+        (id) => id.toString() !== userIdToUnFollow
+      );
+      userToUnFollow.friendRequestsReceived = userToUnFollow.friendRequestsReceived.filter(
+        (id) => id.toString() !== userId
+      );
 
-    // Ensure counts don't go below zero
-    currentUser.followingCount = Math.max(0, currentUser.followingCount - 1);
-    userToUnFollow.followerCount = Math.max(
-      0,
-      userToUnFollow.followerCount - 1
-    );
+      await currentUser.save({ validateBeforeSave: false });
+      await userToUnFollow.save({ validateBeforeSave: false });
 
-    await currentUser.save();
-    await userToUnFollow.save();
+      return response(res, 200, "Friend request cancelled successfully");
+    }
 
-    return response(res, 200, "User unfollowed successfully");
+    return response(res, 400, "No friendship or pending request exists with this user");
   } catch (error) {
     return response(res, 500, "Internal server error", error.message);
   }
@@ -94,108 +143,80 @@ const unFollowUser = async (req, res) => {
 const deleteUserFromRequest = async (req, res) => {
   try {
     const loggedInUserId = req.user.userId; // The user rejecting the request
-    const { requestSenderId } = req.body; // The user who sent the follow request
+    const { requestSenderId } = req.body; // The user who sent the friend request
 
-    // Fetch both users from the database
     const requestSender = await User.findById(requestSenderId);
     const loggedInUser = await User.findById(loggedInUserId);
 
-    // Check if both users exist
     if (!requestSender || !loggedInUser) {
       return response(res, 404, "User not found");
     }
 
-    // Check karenge ki requestSender ne logged-in user ko follow kiya hai ya nahi.
-    const isRequestSend = requestSender.followings.includes(loggedInUserId);
-    if (!isRequestSend) {
-      return response(res, 404, "No Request Found For This User");
-    }
-
-    // Remove the logged-in user's ID from the request sender's followings list
-    requestSender.followings = requestSender.followings.filter(
+    // Remove from pending lists
+    loggedInUser.friendRequestsReceived = loggedInUser.friendRequestsReceived.filter(
+      (user) => user.toString() !== requestSenderId
+    );
+    requestSender.friendRequestsSent = requestSender.friendRequestsSent.filter(
       (user) => user.toString() !== loggedInUserId
     );
 
-    // Remove the request sender's ID from the logged-in user's followers list
-    loggedInUser.followers = loggedInUser.followers.filter(
-      (user) => user.toString() !== requestSenderId
-    );
+    await loggedInUser.save({ validateBeforeSave: false });
+    await requestSender.save({ validateBeforeSave: false });
 
-    // Update follow counts
-    loggedInUser.followerCount = loggedInUser.followers.length;
-    requestSender.followingCount = requestSender.followings.length; // Fix: It should be 'followingCount', not 'followerCount'
-
-    // Save the updated data for both users
-    await loggedInUser.save();
-    await requestSender.save();
-
-    // Send success response
     return response(
       res,
       200,
-      `Friend Request From ${requestSender.username} deleted successfully `
+      `Friend Request From ${requestSender.username} deleted successfully`
     );
   } catch (error) {
     return response(res, 500, "Internal server error", error.message);
   }
 };
 
-// get all friend jisne logged in user ko request bheja hai
 const getAllFriendRequest = async (req, res) => {
   try {
     const loggedInUserId = req.user.userId;
 
-    
-    // Find the logged-in user's followers and followings
-    const loggedInUser = await User.findById(loggedInUserId).select(
-      "followers followings"
+    const loggedInUser = await User.findById(loggedInUserId).populate(
+      "friendRequestsReceived",
+      "username profilePicture email friendsCount"
     );
-    
+
     if (!loggedInUser) {
       return response(res, 404, "User Not Found");
     }
 
-
-    // Find users who follow the logged-in user but are not followed back by the logged-in user
-    const userToFollowBack = await User.find({
-      _id: {
-        $in: loggedInUser.followers, // Jo users logged-in user ko follow kar rahe hain
-        $nin: loggedInUser.followings, // Unko hata do jinko logged-in user already follow kar raha hai taki sirf unka data he aae jinhone follow request bheja hai
-      },
-    }).select("username profilePicture email followerCount"); // Sirf important fields fetch kar rahe hain
-
     return response(
       res,
       200,
-      "Users to follow back fetched successfully",
-      userToFollowBack
+      "Friend requests fetched successfully",
+      loggedInUser.friendRequestsReceived || []
     );
   } catch (error) {
     return response(res, 500, "Internal Server Error", error.message);
   }
 };
 
-// friend suggestion ke liye
 const getAllUserForRequest = async (req, res) => {
   try {
     const loggedInUserId = req.user.userId;
 
-    //  Step 1: Find logged-in user's followers and followings
-    const loggedInUser = await User.findById(loggedInUserId).select(
-      "followers followings"
-    );
+    const loggedInUser = await User.findById(loggedInUserId);
 
     if (!loggedInUser) {
       return response(res, 404, "User Not Found");
     }
 
-    // Step 2: Find users who are NOT in logged-in user's followers OR followings
+    const excludedIds = [
+      loggedInUserId,
+      ...(loggedInUser.friends || []),
+      ...(loggedInUser.friendRequestsSent || []),
+      ...(loggedInUser.friendRequestsReceived || []),
+    ];
+
     const userForFriendRequest = await User.find({
-      _id: {
-        $ne: loggedInUserId, //  Khud ko exclude karna hai
-        $nin: [...loggedInUser.followers, ...loggedInUser.followings], //  Unko exclude jo already followers ya followings me hain
-      },
-    }).select("username profilePicture email followerCount"); //  Sirf important fields fetch kar rahe hain
+      _id: { $nin: excludedIds },
+    }).select("username profilePicture email friendsCount");
 
     return response(
       res,
@@ -208,49 +229,25 @@ const getAllUserForRequest = async (req, res) => {
   }
 };
 
-// api for get mutual friends
-
 const getAllMutualFriends = async (req, res) => {
   try {
     const loggedInUserId = req.user.userId;
 
-    //  Step 1: Logged-in user ka `followers` aur `followings` nikal rahe hain
     const loggedInUser = await User.findById(loggedInUserId)
-      .select("followers followings") // Sirf followers aur followings ka data lenge
-      .populate(
-        "followings",
-        "username profilePicture email followerCount followingCount"
-      ) // Followings ka actual data la rahe hain
-      .populate(
-        "followers",
-        "username profilePicture email followerCount followingCount"
-      ); // Followers ka actual data la rahe hain
+      .select("friends")
+      .populate("friends", "username profilePicture email friendsCount");
 
-    //  Step 2: Agar user exist nahi karta to 404 response bhejo
     if (!loggedInUser) {
-      return res.status(404).json({ message: "User Not Found" });
+      return response(res, 404, "User Not Found");
     }
 
-    //  Step 3: Logged-in user ke `followings` ka ek `Set` bana rahe hain
-    // (Taaki fast lookup ho sake)
-    const followingUserId = new Set(
-      loggedInUser.followings.map((user) => user._id.toString())
-    );
-
-    //  Step 4: `followers` me se sirf woh users lenge jo `followings` me bhi hain
-    const mutualFriends = loggedInUser.followers.filter(
-      (follower) => followingUserId.has(follower._id.toString()) // Agar follower bhi following list me hai to mutual friend hai
-    );
-
-    //  Step 5: Mutual Friends ka response bhejo
     return response(
       res,
       200,
-      "mutal friends fetched successfully",
-      mutualFriends
+      "mutual friends fetched successfully",
+      loggedInUser.friends || []
     );
   } catch (error) {
-    //  Step 6: Agar koi error aaye to 500 response bhejo
     return response(res, 500, "Internal Server Error", error.message);
   }
 };
@@ -330,17 +327,32 @@ const getUserProfile = async (req, res) => {
     const userProfile = await User.findById(userId)
       .select("-password")
       .populate("bio")
-      .populate("followers", "_id username profilePicture email")
-      .populate("followings", "_id username profilePicture email")
+      .populate("friends", "_id username profilePicture email friendsCount")
+      .populate("friendRequestsReceived", "_id username profilePicture email friendsCount")
+      .populate("friendRequestsSent", "_id username profilePicture email friendsCount")
       .exec();
     if (!userProfile) {
       return response(res, 403, "user not found");
     }
     const isOwner = loggedInUserId === userId;
 
+    let friendshipStatus = "none";
+    if (loggedInUserId) {
+      if (loggedInUserId.toString() === userId.toString()) {
+        friendshipStatus = "self";
+      } else if (userProfile.friends.some((f) => f._id.toString() === loggedInUserId)) {
+        friendshipStatus = "friends";
+      } else if (userProfile.friendRequestsReceived.some((r) => r._id.toString() === loggedInUserId)) {
+        friendshipStatus = "sent_pending";
+      } else if (userProfile.friendRequestsSent.some((r) => r._id.toString() === loggedInUserId)) {
+        friendshipStatus = "received_pending";
+      }
+    }
+
     return response(res, 201, "user profile get succesfully", {
       profile: userProfile,
       isOwner,
+      friendshipStatus,
     });
   } catch (error) {
     return response(res, 500, "internal server error", error.message);

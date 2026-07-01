@@ -6,7 +6,7 @@ const notificationSchema = new mongoose.Schema(
     sender: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true }, 
     type: {
       type: String,
-      enum: ["message", "reaction", "follow", "unfollow"],
+      enum: ["message", "reaction", "follow", "unfollow", "like", "comment", "friend_request", "friend_accept"],
       required: true,
     },
     message: { type: String, required: true },

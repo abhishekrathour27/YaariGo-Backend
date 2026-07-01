@@ -2,6 +2,7 @@ import { uploadFileToCloudinary } from "../config/cloudinary.js";
 import Post from "../model/postModel.js";
 import Story from "../model/storyModel.js";
 import response from "../utils/responseHandler.js";
+import Notification from "../model/notification.js";
 
 const createPost = async (req, res) => {
   try {
@@ -263,6 +264,16 @@ const likePost = async (req, res) => {
 
     const updatedPost = await post.save();
 
+    // Create notification if someone else likes the post
+    if (!hasLiked && post.user.toString() !== userId.toString()) {
+      await Notification.create({
+        recipient: post.user,
+        sender: userId,
+        type: "like",
+        message: "liked your post"
+      });
+    }
+
     return response(
       res,
       201,
@@ -300,6 +311,17 @@ const addCommentToPost = async (req, res) => {
     post.commentCount += 1;
 
     await post.save();
+
+    // Create notification if someone else comments on the post
+    if (post.user.toString() !== userId.toString()) {
+      await Notification.create({
+        recipient: post.user,
+        sender: userId,
+        type: "comment",
+        message: "commented on your post",
+        content: text
+      });
+    }
 
     return response(
       res,

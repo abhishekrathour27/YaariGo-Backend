@@ -3,10 +3,16 @@ import { generateToken } from "../utils/generateToken.js";
 import response from "../utils/responseHandler.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { sendResetPasswordLinkToEmail } from "../utils/emailSender.js";
 
 const registerUser = async (req, res) => {
   try {
-    const { username, email, password, gender } = req.body;
+    const { username, name, email, password, gender } = req.body;
+    const finalUsername = username || name;
+
+    if (!finalUsername || !email || !password) {
+      return response(res, 400, "Username, email, and password are required");
+    }
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -16,7 +22,7 @@ const registerUser = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const newUser = new User({
-      username,
+      username: finalUsername,
       email,
       password: hashedPassword,
       gender,

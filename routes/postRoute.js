@@ -11,6 +11,7 @@ import {
   getAllStory,
   createStory,
   deletePost,
+  deleteStory,
 } from "../controllers/postController.js";
 
 const router = express.Router();
@@ -62,5 +63,11 @@ router.post(
 );
 
 router.get("/story", authMiddleware, getAllStory);
+
+router.delete(
+  "/story/:storyId",
+  authMiddleware,
+  deleteStory
+);
 
 export default router;

@@ -3,6 +3,7 @@ import Post from "../model/postModel.js";
 import Story from "../model/storyModel.js";
 import response from "../utils/responseHandler.js";
 import Notification from "../model/notification.js";
+import User from "../model/userModel.js";
 
 const createPost = async (req, res) => {
   try {
@@ -140,7 +141,12 @@ const createStory = async (req, res) => {
 
 const getAllStory = async (req, res) => {
   try {
-    const story = await Story.find()
+    const loggedInUser = await User.findById(req.user.userId).select("friends");
+    const friendIds = loggedInUser ? loggedInUser.friends : [];
+
+    const story = await Story.find({
+      user: { $in: [req.user.userId, ...friendIds] }
+    })
       .sort({ createdAt: -1 })
       .populate(
         "user",
@@ -164,9 +170,51 @@ const getAllStory = async (req, res) => {
   }
 };
 
+const deleteStory = async (req, res) => {
+  const { storyId } = req.params;
+  const userId = req.user.userId;
+
+  try {
+    const story = await Story.findById(storyId);
+
+    if (!story) {
+      return response(res, 404, "Story Not Found");
+    }
+
+    if (story.user.toString() !== userId) {
+      return response(
+        res,
+        403,
+        "You are not authorized to delete this story"
+      );
+    }
+
+    await Story.findByIdAndDelete(storyId);
+
+    return response(
+      res,
+      200,
+      "Story deleted successfully"
+    );
+  } catch (error) {
+    console.log("error deleting story", error);
+    return response(
+      res,
+      500,
+      "Internal server error",
+      error.message
+    );
+  }
+};
+
 const getAllPost = async (req, res) => {
   try {
-    const posts = await Post.find()
+    const loggedInUser = await User.findById(req.user.userId).select("friends");
+    const friendIds = loggedInUser ? loggedInUser.friends : [];
+
+    const posts = await Post.find({
+      user: { $in: [req.user.userId, ...friendIds] }
+    })
       .sort({ createdAt: -1 })
       .populate(
         "user",
@@ -196,6 +244,7 @@ const getAllPost = async (req, res) => {
 
 const getPostByUserId = async (req, res) => {
   const { userId } = req.params;
+  const currentUserId = req.user.userId;
 
   try {
     if (!userId) {
@@ -204,6 +253,17 @@ const getPostByUserId = async (req, res) => {
         400,
         "user id is required to get user post"
       );
+    }
+
+    if (userId !== currentUserId) {
+      const targetUser = await User.findById(userId).select("friends");
+      if (!targetUser || !targetUser.friends.includes(currentUserId)) {
+        return response(
+          res,
+          403,
+          "You are not friends with this user to view their posts"
+        );
+      }
     }
 
     const posts = await Post.find({
@@ -263,6 +323,11 @@ const likePost = async (req, res) => {
     }
 
     const updatedPost = await post.save();
+    await updatedPost.populate("user", "_id username profilePicture email");
+    await updatedPost.populate({
+      path: "comments.user",
+      select: "username profilePicture",
+    });
 
     // Create notification if someone else likes the post
     if (!hasLiked && post.user.toString() !== userId.toString()) {
@@ -311,6 +376,11 @@ const addCommentToPost = async (req, res) => {
     post.commentCount += 1;
 
     await post.save();
+    await post.populate("user", "_id username profilePicture email");
+    await post.populate({
+      path: "comments.user",
+      select: "username profilePicture",
+    });
 
     // Create notification if someone else comments on the post
     if (post.user.toString() !== userId.toString()) {
@@ -360,6 +430,11 @@ const sharePost = async (req, res) => {
     post.shareCount += 1;
 
     await post.save();
+    await post.populate("user", "_id username profilePicture email");
+    await post.populate({
+      path: "comments.user",
+      select: "username profilePicture",
+    });
 
     return response(
       res,
@@ -388,4 +463,5 @@ export {
   createStory,
   getAllStory,
   deletePost,
+  deleteStory,
 };

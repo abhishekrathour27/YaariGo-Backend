@@ -1,4 +1,3 @@
-
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -21,10 +20,7 @@ const app = express();
 // Middlewares
 app.use(express.json());
 
-const allowedOrigins = [
-  "https://yaari-go-frontend.vercel.app",
-  "http://localhost:3000",
-];
+const allowedOrigins = ["https://yaari-go-frontend.vercel.app"];
 
 const corsOption = {
   origin: function (origin, callback) {

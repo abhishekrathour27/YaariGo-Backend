@@ -22,7 +22,7 @@ const app = express();
 app.use(express.json());
 
 const allowedOrigins = [
-  "https://lets-meet-l.vercel.app",
+  "https://yaari-go-frontend.vercel.app",
   "http://localhost:3000",
 ];
 

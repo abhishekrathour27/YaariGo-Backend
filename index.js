@@ -1,21 +1,25 @@
+
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import passport from "passport";
+
 import connectDb from "./config/db.js";
+
 import authRouter from "./routes/authRoute.js";
 import postRouter from "./routes/postRoute.js";
 import userRouter from "./routes/userRoute.js";
 import messageRoute from "./routes/messageRoute.js";
 import notificationRoute from "./routes/notificationRoute.js";
-import passport from "passport";
+
 import "./controllers/googleController.js";
-import { app, server } from "./socketIO/server.js";
 
 dotenv.config();
 
-app.use(express.json());
+const app = express();
 
-// Removed cookie-parser since we're using localStorage tokens
+// Middlewares
+app.use(express.json());
 
 const allowedOrigins = [
   "https://lets-meet-l.vercel.app",
@@ -36,24 +40,32 @@ const corsOption = {
 app.use(cors(corsOption));
 app.use(passport.initialize());
 
+// MongoDB connection middleware
+app.use(async (req, res, next) => {
+  try {
+    await connectDb();
+    next();
+  } catch (error) {
+    console.error("MongoDB connection failed:", error);
+    res.status(500).json({
+      message: "Database connection failed",
+    });
+  }
+});
+
+// API Routes
 app.use("/api/auth", authRouter);
 app.use("/api/users", postRouter);
 app.use("/api/users", userRouter);
 app.use("/api/message", messageRoute);
 app.use("/api/notification", notificationRoute);
 
-const PORT = process.env.PORT || 8080;
-
-connectDb()
-  .then(() => {
-    server.listen(PORT, () => {
-      console.log(
-        `Server is running on http://localhost:${PORT}`
-      );
-    });
-  })
-  .catch((error) => {
-    console.error(
-      "Failed to connect to MongoDB. Server not started."
-    );
+// Health check
+app.get("/", (req, res) => {
+  res.status(200).json({
+    message: "YaariGo Backend is running!",
   });
+});
+
+// Export Express app for Vercel
+export default app;
